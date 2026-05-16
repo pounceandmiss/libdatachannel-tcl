@@ -1,0 +1,5 @@
+# Generated from tcl/pkgIndex.tcl.in by CMake. Drop the build/tcl/
+# directory on Tcl's auto_path (or set TCLLIBPATH=...) and
+# `package require rtc` resolves to the .so next to this file.
+package ifneeded rtc @PROJECT_VERSION@ \
+    [list load [file join $dir "rtc[info sharedlibextension]"] Rtc]
