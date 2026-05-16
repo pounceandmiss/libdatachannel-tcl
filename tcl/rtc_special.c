@@ -140,25 +140,42 @@ static int Cmd_common_receive_message(void *cd, Tcl_Interp *interp, int objc,
     int id;
     if (Tcl_GetIntFromObj(interp, objv[1], &id) != TCL_OK) return TCL_ERROR;
 
-    /* Probe: pass NULL buffer, size=0; libdatachannel writes required size
-     * into *size and returns RTC_ERR_TOO_SMALL (or 0 if no message). */
+    /* Probe: NULL buffer returns RTC_ERR_SUCCESS with *size set to the
+     * required buffer length. Positive = binary byte count; negative =
+     * string mode, |*size| includes the trailing NUL. Empty queue
+     * returns RTC_ERR_NOT_AVAIL. */
     int sz = 0;
     int rc = rtcReceiveMessage(id, NULL, &sz);
-    if (rc == RTC_ERR_NOT_AVAIL || sz <= 0) {
+    if (rc == RTC_ERR_NOT_AVAIL) {
         Tcl_SetObjResult(interp, Tcl_NewByteArrayObj(NULL, 0));
         return TCL_OK;
     }
-    if (rc < 0 && rc != RTC_ERR_TOO_SMALL) {
+    if (rc < 0) {
         return RtcReturnInt(interp, rc);
     }
+    int is_text = (sz < 0);
+    int cap = is_text ? -sz : sz;
+    if (cap <= 0) {
+        Tcl_SetObjResult(interp, is_text
+            ? Tcl_NewStringObj("", 0)
+            : Tcl_NewByteArrayObj(NULL, 0));
+        return TCL_OK;
+    }
 
-    char *buf = (char *)ckalloc((size_t)sz);
+    char *buf = (char *)ckalloc((size_t)cap);
+    sz = cap;   /* libdatachannel abs()'s the input; sign is restored on output */
     rc = rtcReceiveMessage(id, buf, &sz);
     if (rc < 0) {
         ckfree(buf);
         return RtcReturnInt(interp, rc);
     }
-    Tcl_SetObjResult(interp, Tcl_NewByteArrayObj((unsigned char *)buf, sz));
+    if (sz < 0) {
+        int slen = -sz - 1;
+        if (slen < 0) slen = 0;
+        Tcl_SetObjResult(interp, Tcl_NewStringObj(buf, slen));
+    } else {
+        Tcl_SetObjResult(interp, Tcl_NewByteArrayObj((unsigned char *)buf, sz));
+    }
     ckfree(buf);
     return TCL_OK;
 }

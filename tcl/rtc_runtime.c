@@ -155,7 +155,7 @@ typedef struct { Tcl_Event ev; int rtcId; int slot; } EvNoArgs;
 typedef struct { Tcl_Event ev; int rtcId; int slot; int i1; } EvInt;
 typedef struct { Tcl_Event ev; int rtcId; int slot; char *s1; } EvString;
 typedef struct { Tcl_Event ev; int rtcId; int slot; char *s1; char *s2; } EvTwoStr;
-typedef struct { Tcl_Event ev; int rtcId; int slot; char *data; int size; } EvBytes;
+typedef struct { Tcl_Event ev; int rtcId; int slot; char *data; int size; int is_text; } EvBytes;
 
 /* Look up the registered script for (rtcId, slot) under mutex, bumping
  * its refcount. Returns NULL if absent. */
@@ -265,10 +265,11 @@ static int DispatchBytes(Tcl_Event *evPtr, int flags) {
     Tcl_Interp *interp = NULL;
     Tcl_Obj *s = acquire_script(e->rtcId, e->slot, &interp);
     if (s && interp) {
-        Tcl_Obj *args[1] = {
-            Tcl_NewByteArrayObj((unsigned char *)(e->data ? e->data : ""),
-                                e->size)
-        };
+        Tcl_Obj *arg = e->is_text
+            ? Tcl_NewStringObj(e->data ? e->data : "", e->size)
+            : Tcl_NewByteArrayObj((unsigned char *)(e->data ? e->data : ""),
+                                  e->size);
+        Tcl_Obj *args[1] = { arg };
         eval_with_args(interp, s, e->rtcId, args, 1);
         Tcl_DecrRefCount(s);
     }
@@ -418,13 +419,27 @@ void RtcEnqueueBytes(int rtcId, int slot, const char *data, int size) {
     e->ev.nextPtr = NULL;
     e->rtcId = rtcId;
     e->slot  = slot;
-    if (data && size > 0) {
+    /* libdatachannel signals string-mode messages with size < 0; the
+     * payload is a NUL-terminated UTF-8 string and |size| includes the
+     * trailing NUL. Strip the NUL and remember the text/binary kind so
+     * DispatchBytes can hand the script a Tcl string vs byte array. */
+    if (data && size < 0) {
+        int n = -size - 1;
+        if (n < 0) n = 0;
+        e->data = (char *)ckalloc((size_t)n + 1);
+        memcpy(e->data, data, (size_t)n);
+        e->data[n] = '\0';
+        e->size = n;
+        e->is_text = 1;
+    } else if (data && size > 0) {
         e->data = (char *)ckalloc((size_t)size);
         memcpy(e->data, data, (size_t)size);
         e->size = size;
+        e->is_text = 0;
     } else {
         e->data = NULL;
         e->size = 0;
+        e->is_text = (size < 0);
     }
     Tcl_ThreadQueueEvent(t, &e->ev, TCL_QUEUE_TAIL);
     Tcl_ThreadAlert(t);
