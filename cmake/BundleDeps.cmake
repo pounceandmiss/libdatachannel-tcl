@@ -38,6 +38,8 @@ endif()
 
 set(_common_cache_args
   -DCMAKE_INSTALL_PREFIX:PATH=${RTC_VENDOR_PREFIX}
+  # keep installs in vendor/lib; GNUInstallDirs picks lib64 on some distros
+  -DCMAKE_INSTALL_LIBDIR:STRING=lib
   -DCMAKE_BUILD_TYPE:STRING=${CMAKE_BUILD_TYPE}
   -DCMAKE_POSITION_INDEPENDENT_CODE:BOOL=ON
   -DBUILD_SHARED_LIBS:BOOL=OFF
