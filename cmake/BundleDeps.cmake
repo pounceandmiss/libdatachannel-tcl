@@ -54,10 +54,22 @@ set(_common_cache_args
 # CMAKE_PREFIX_PATH is forwarded from this configure so libdatachannel's own
 # find_package(MbedTLS) (via its bundled FindMbedTLS.cmake) discovers the
 # same external install we found above.
+# Set RTC_LIBDATACHANNEL_SOURCE_DIR to build from a pre-staged tree (offline /
+# flatpak) instead of cloning; submodules (juice/srtp2/usrsctp) must already be
+# checked out there.
+set(RTC_LIBDATACHANNEL_SOURCE_DIR "" CACHE PATH
+  "Pre-staged libdatachannel source tree; clone upstream when empty")
+if(RTC_LIBDATACHANNEL_SOURCE_DIR)
+  set(_libdc_fetch SOURCE_DIR ${RTC_LIBDATACHANNEL_SOURCE_DIR} DOWNLOAD_COMMAND "")
+else()
+  set(_libdc_fetch
+    GIT_REPOSITORY https://github.com/paullouisageneau/libdatachannel.git
+    GIT_TAG        c47f5d77c124c35c31ac8378ad613295a124d354
+    GIT_SUBMODULES_RECURSE TRUE)
+endif()
+
 ExternalProject_Add(libdatachannel_external
-  GIT_REPOSITORY    https://github.com/paullouisageneau/libdatachannel.git
-  GIT_TAG           c47f5d77c124c35c31ac8378ad613295a124d354
-  GIT_SUBMODULES_RECURSE TRUE
+  ${_libdc_fetch}
   PREFIX            ${CMAKE_BINARY_DIR}/_libdatachannel
   CMAKE_CACHE_ARGS
     ${_common_cache_args}
