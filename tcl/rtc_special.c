@@ -217,22 +217,57 @@ static int Cmd_send_message(void *cd, Tcl_Interp *interp, int objc,
 }
 
 /* -- ::rtc::set-log-level -------------------------------------------- */
+/* Index doubles as the rtcLogLevel enum value. */
+static const char *const kRtcLogLevelNames[] = {
+    "none", "fatal", "error", "warning", "info", "debug", "verbose", NULL
+};
+
+/* Registry id for the global logger; real rtc ids are non-negative. */
+#define RTC_LOG_ID (-424242)
+
+static rtcLogLevel g_rtc_log_level = RTC_LOG_WARNING;
+
+/* Worker-thread callback; the runtime trampoline relays the line to the
+ * registering Tcl thread as: prefix RTC_LOG_ID level message. */
+static void RtcLogCb(rtcLogLevel level, const char *message) {
+    const char *lname = ((int)level >= 0 && (int)level <= 6)
+        ? kRtcLogLevelNames[level] : "info";
+    RtcEnqueueTwoStr(RTC_LOG_ID, 0, lname, message ? message : "");
+}
+
+/* Relayed by RtcRegisterCallback to install or detach RtcLogCb. */
+static int RtcLoggerSetter(int id, void (*cb)(void)) {
+    (void)id;
+    rtcInitLogger(g_rtc_log_level, (rtcLogCallbackFunc)cb);
+    return 0;
+}
 
 static int Cmd_set_log_level(void *cd, Tcl_Interp *interp, int objc,
                              Tcl_Obj *const objv[]) {
     (void)cd;
-    if (objc != 2) {
-        Tcl_WrongNumArgs(interp, 1, objv, "level");
+    if (objc != 2 && objc != 3) {
+        Tcl_WrongNumArgs(interp, 1, objv, "level ?callback?");
         return TCL_ERROR;
     }
-    static const char *names[] = {
-        "none", "fatal", "error", "warning", "info", "debug", "verbose", NULL
-    };
     int idx;
-    if (Tcl_GetIndexFromObj(interp, objv[1], names, "log-level", 0, &idx)
-        != TCL_OK) return TCL_ERROR;
-    rtcInitLogger((rtcLogLevel)idx, NULL);   /* default stderr sink */
-    return TCL_OK;
+    if (Tcl_GetIndexFromObj(interp, objv[1], kRtcLogLevelNames, "log-level",
+                            0, &idx) != TCL_OK) return TCL_ERROR;
+    g_rtc_log_level = (rtcLogLevel)idx;
+
+    /* No/empty callback clears any prior one and uses the NULL stderr sink. */
+    Tcl_Obj *empty = NULL;
+    Tcl_Obj *script;
+    if (objc == 3) {
+        script = objv[2];
+    } else {
+        empty = Tcl_NewObj();
+        Tcl_IncrRefCount(empty);
+        script = empty;
+    }
+    int rc = RtcRegisterCallback(interp, RTC_LOG_ID, 0, script,
+                                 RtcLoggerSetter, (void (*)(void))RtcLogCb);
+    if (empty) Tcl_DecrRefCount(empty);
+    return rc;
 }
 
 /* -- registration --------------------------------------------------- */
